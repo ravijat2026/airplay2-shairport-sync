@@ -1,103 +1,82 @@
-name: Build OpenWrt Shairport-Sync IPK (robust SDK download)
+name: Build Shairport-Sync for OpenWRT
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch: # manually trigger karne ke liye
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      SDK_URL: "https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt76x8/openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-      SDK_FILE: "openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-      SDK_DIRNAME_PREFIX: "openwrt-sdk-23.05.5-ramips-mt76x8"
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install host build deps
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential git wget xz-utils file \
-            libncurses5-dev zlib1g-dev gawk gettext unzip python3 \
-            autoconf automake libtool pkg-config ccache rsync \
-            libssl-dev xsltproc
+          sudo apt install -y build-essential git wget unzip
 
-      - name: Restore SDK tarball cache
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: sdk-tar
-          key: sdk-tar-23.05.5-ramips-mt76x8-v1
-
-      - name: Ensure sdk directory (download if needed, with retries)
+      - name: Download OpenWRT SDK
         run: |
-          set -euo pipefail
-          mkdir -p sdk-tar
+          wget https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt76x8/openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          tar -xf openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          mv openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64 sdk
 
-          # If sdk already extracted, skip
-          if [ -d "sdk" ]; then
-            echo "SDK already present (sdk/). Skipping download."
-            ls -la sdk | sed -n '1,120p'
-            exit 0
-          fi
-
-          # If cached tarball present, extract it
-          if [ -f "sdk-tar/${SDK_FILE}" ]; then
-            echo "Found cached tarball sdk-tar/${SDK_FILE} — extracting..."
-            tar -xJf "sdk-tar/${SDK_FILE}"
-            mv ${SDK_DIRNAME_PREFIX}* sdk || true
-            ls -la sdk | sed -n '1,120p'
-            exit 0
-          fi
-
-          # Otherwise download with retries and resume
-          echo "Downloading SDK from ${SDK_URL} ..."
-          # wget with retries, resume, smaller timeouts so step fails fast if network down
-          wget --tries=8 --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=30 \
-               --continue -O "sdk-tar/${SDK_FILE}" "${SDK_URL}"
-
-          # sanity check
-          if [ ! -f "sdk-tar/${SDK_FILE}" ]; then
-            echo "ERROR: SDK tarball not found after download."
-            ls -la sdk-tar || true
-            exit 2
-          fi
-
-          echo "Extracting SDK..."
-          tar -xJf "sdk-tar/${SDK_FILE}"
-          mv ${SDK_DIRNAME_PREFIX}* sdk || true
-          echo "SDK ready in ./sdk/"
-          ls -la sdk | sed -n '1,120p'
-
-      - name: Copy package into SDK
+      - name: Setup Shairport-Sync package
         run: |
-          mkdir -p sdk/package/sound/shairport-sync-airplay2
-          cp -r package/shairport-sync-airplay2/* sdk/package/sound/shairport-sync-airplay2/
-          chmod +x sdk/package/sound/shairport-sync-airplay2/files/shairport-sync.init || true
-          ls -la sdk/package/sound/shairport-sync-airplay2
+          mkdir -p sdk/package/sound
+          git clone https://github.com/mikebrady/shairport-sync.git
+          cp -r shairport-sync openwrt-shairport-sync
+          # simple OpenWRT Makefile
+          mkdir -p sdk/package/sound/shairport-sync
+          cat > sdk/package/sound/shairport-sync/Makefile <<'EOF'
+          include $(TOPDIR)/rules.mk
 
-      - name: Update feeds inside SDK
+          PKG_NAME:=shairport-sync
+          PKG_VERSION:=4.3
+          PKG_RELEASE:=1
+          PKG_SOURCE_PROTO:=git
+          PKG_SOURCE_URL:=https://github.com/mikebrady/shairport-sync.git
+          PKG_SOURCE_VERSION:=master
+
+          include $(INCLUDE_DIR)/package.mk
+
+          define Package/shairport-sync
+            SECTION:=sound
+            CATEGORY:=Sound
+            TITLE:=AirPlay 2 Shairport-Sync
+            DEPENDS:=+libopenssl +libpthread +libdaemon +alsa-lib
+          endef
+
+          define Package/shairport-sync/description
+            Shairport Sync with AirPlay 2 support (lightweight build).
+          endef
+
+          define Package/shairport-sync/install
+            $(INSTALL_DIR) $(1)/usr/bin
+            $(INSTALL_BIN) $(PKG_BUILD_DIR)/shairport-sync $(1)/usr/bin/
+          endef
+
+          $(eval $(call BuildPackage,shairport-sync))
+          EOF
+
+      - name: Build Package
         run: |
           cd sdk
           ./scripts/feeds update -a
-          ./scripts/feeds install -a || true
-
-      - name: Build package only (verbose)
-        env:
-          MAKEFLAGS: "-j2"
-        run: |
-          cd sdk
+          ./scripts/feeds install -a
           make defconfig
-          make package/shairport-sync-airplay2/compile V=s 2>&1 | tee build.log
-          grep -n "error:" build.log || true
+          make package/shairport-sync/compile V=s
 
-      - name: Upload IPK artifact(s)
+      - name: List build output
+        run: |
+          ls -R sdk/bin || true
+
+      - name: Upload IPK
         uses: actions/upload-artifact@v4
         with:
-          name: shairport-ipk
+          name: shairport-sync-ipk
           path: |
-            sdk/bin/packages/*/sound/*.ipk
             sdk/bin/packages/*/*/shairport-sync_*.ipk
+            sdk/bin/packages/*/*/*/shairport-sync_*.ipk
+            sdk/bin/targets/*/*/packages/shairport-sync_*.ipk
