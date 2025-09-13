@@ -1,40 +1,103 @@
-name: Build Shairport-Sync AirPlay2
+name: Build OpenWrt Shairport-Sync IPK (robust SDK download)
 
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      SDK_URL: "https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt76x8/openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+      SDK_FILE: "openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+      SDK_DIRNAME_PREFIX: "openwrt-sdk-23.05.5-ramips-mt76x8"
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y build-essential git wget unzip libncurses5-dev libssl-dev gettext xsltproc
+      - name: Install host build deps
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential git wget xz-utils file \
+            libncurses5-dev zlib1g-dev gawk gettext unzip python3 \
+            autoconf automake libtool pkg-config ccache rsync \
+            libssl-dev xsltproc
 
-    - name: Download OpenWrt SDK
-      run: |
-        wget https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt76x8/openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-        tar -xvf openwrt-sdk-*.tar.xz
-        mv openwrt-sdk-* sdk
+      - name: Restore SDK tarball cache
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk-tar
+          key: sdk-tar-23.05.5-ramips-mt76x8-v1
 
-    - name: Copy package
-      run: |
-        mkdir -p sdk/package/sound/shairport-sync-airplay2
-        cp -r package/shairport-sync-airplay2/* sdk/package/sound/shairport-sync-airplay2/
+      - name: Ensure sdk directory (download if needed, with retries)
+        run: |
+          set -euo pipefail
+          mkdir -p sdk-tar
 
-    - name: Build package
-      run: |
-        cd sdk
-        make defconfig
-        make package/shairport-sync-airplay2/compile V=s
+          # If sdk already extracted, skip
+          if [ -d "sdk" ]; then
+            echo "SDK already present (sdk/). Skipping download."
+            ls -la sdk | sed -n '1,120p'
+            exit 0
+          fi
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ipk-files
-        path: sdk/bin/packages/*/sound/*.ipk
+          # If cached tarball present, extract it
+          if [ -f "sdk-tar/${SDK_FILE}" ]; then
+            echo "Found cached tarball sdk-tar/${SDK_FILE} — extracting..."
+            tar -xJf "sdk-tar/${SDK_FILE}"
+            mv ${SDK_DIRNAME_PREFIX}* sdk || true
+            ls -la sdk | sed -n '1,120p'
+            exit 0
+          fi
+
+          # Otherwise download with retries and resume
+          echo "Downloading SDK from ${SDK_URL} ..."
+          # wget with retries, resume, smaller timeouts so step fails fast if network down
+          wget --tries=8 --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=30 \
+               --continue -O "sdk-tar/${SDK_FILE}" "${SDK_URL}"
+
+          # sanity check
+          if [ ! -f "sdk-tar/${SDK_FILE}" ]; then
+            echo "ERROR: SDK tarball not found after download."
+            ls -la sdk-tar || true
+            exit 2
+          fi
+
+          echo "Extracting SDK..."
+          tar -xJf "sdk-tar/${SDK_FILE}"
+          mv ${SDK_DIRNAME_PREFIX}* sdk || true
+          echo "SDK ready in ./sdk/"
+          ls -la sdk | sed -n '1,120p'
+
+      - name: Copy package into SDK
+        run: |
+          mkdir -p sdk/package/sound/shairport-sync-airplay2
+          cp -r package/shairport-sync-airplay2/* sdk/package/sound/shairport-sync-airplay2/
+          chmod +x sdk/package/sound/shairport-sync-airplay2/files/shairport-sync.init || true
+          ls -la sdk/package/sound/shairport-sync-airplay2
+
+      - name: Update feeds inside SDK
+        run: |
+          cd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a || true
+
+      - name: Build package only (verbose)
+        env:
+          MAKEFLAGS: "-j2"
+        run: |
+          cd sdk
+          make defconfig
+          make package/shairport-sync-airplay2/compile V=s 2>&1 | tee build.log
+          grep -n "error:" build.log || true
+
+      - name: Upload IPK artifact(s)
+        uses: actions/upload-artifact@v4
+        with:
+          name: shairport-ipk
+          path: |
+            sdk/bin/packages/*/sound/*.ipk
+            sdk/bin/packages/*/*/shairport-sync_*.ipk
