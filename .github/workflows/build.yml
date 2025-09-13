@@ -34,7 +34,7 @@ jobs:
         make package/shairport-sync-airplay2/compile V=s
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ipk-files
         path: sdk/bin/packages/*/sound/*.ipk
