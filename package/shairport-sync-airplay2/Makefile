@@ -29,19 +29,19 @@ define Package/shairport-sync-airplay2/description
 endef
 
 CONFIGURE_ARGS += \
-	--with-alsa \
-	--with-ssl=openssl \
-	--with-avahi \
-	--with-systemd=no \
-	--with-pipe=no \
-	--with-metadata \
-	--with-apple-alac
+    --with-alsa \
+    --with-ssl=openssl \
+    --with-avahi \
+    --with-systemd=no \
+    --with-pipe=no \
+    --with-metadata \
+    --with-apple-alac
 
 define Package/shairport-sync-airplay2/install
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/shairport-sync.init $(1)/etc/init.d/shairport-sync
-	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/etc/config/shairport-sync $(1)/etc/config/shairport-sync
+    $(INSTALL_DIR) $(1)/etc/init.d
+    $(INSTALL_BIN) ./files/shairport-sync.init $(1)/etc/init.d/shairport-sync
+    $(INSTALL_DIR) $(1)/etc/config
+    $(INSTALL_CONF) ./files/etc/config/shairport-sync $(1)/etc/config/shairport-sync
 endef
 
 $(eval $(call BuildPackage,shairport-sync-airplay2))
