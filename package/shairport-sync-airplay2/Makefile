@@ -1,47 +1,72 @@
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=shairport-sync-airplay2
-PKG_VERSION:=4.3.2
+PKG_NAME:=shairport-sync
+PKG_VERSION:=4.3.7
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/mikebrady/shairport-sync.git
-PKG_SOURCE_VERSION:=airplay2
-PKG_MIRROR_HASH:=skip
+PKG_SOURCE_VERSION:=v$(PKG_VERSION)
+PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 
-PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
+PKG_LICENSE:=MIT
+PKG_MAINTAINER:=yourname
 
-PKG_FIXUP:=autoreconf
-PKG_INSTALL:=1
+PKG_BUILD_DEPENDS:=libavahi-client libssl libsoxr libao
 
 include $(INCLUDE_DIR)/package.mk
 
-define Package/shairport-sync-airplay2
+define Package/shairport-sync
   SECTION:=sound
   CATEGORY:=Sound
-  TITLE:=Shairport-Sync with AirPlay 2 support
-  DEPENDS:=+libpthread +librt +alsa-lib +libdaemon +libpopt +libconfig +libssl
+  TITLE:=Shairport Sync (AirPlay 2 capable build)
+  DEPENDS:=+libavahi-client +libopenssl +libsoxr +libao
 endef
 
-define Package/shairport-sync-airplay2/description
- Shairport-Sync 4 (AirPlay 2 fork) with volume, multi-room, and playback control.
- Optimized for OpenWrt (MT7628AN, 128MB RAM).
+define Package/shairport-sync/description
+Lightweight Shairport-Sync with AirPlay2 support (minimal features enabled).
 endef
 
-CONFIGURE_ARGS += \
-    --with-alsa \
-    --with-ssl=openssl \
-    --with-avahi \
-    --with-systemd=no \
-    --with-pipe=no \
-    --with-metadata \
-    --with-apple-alac
+define Build/Prepare
+	$(call Build/Prepare/Default)
+    # Ensure autotools files exist (some tags need autoreconf)
+    ( cd $(PKG_BUILD_DIR); autoreconf -fi || true )
+endef
 
-define Package/shairport-sync-airplay2/install
-    $(INSTALL_DIR) $(1)/etc/init.d
+define Build/Configure
+    ( \
+    cd $(PKG_BUILD_DIR); \
+    ADDLDFLAGS="$(TARGET_LDFLAGS)" \
+    CFLAGS="$(TARGET_CFLAGS) -Os -fdata-sections -ffunction-sections -march=mips32r2" \
+    CXXFLAGS="$(TARGET_CXXFLAGS) -Os -fdata-sections -ffunction-sections" \
+    ./configure \
+      --host=$(GNU_TARGET_NAME) \
+      --sysconfdir=/etc \
+      --with-ao=yes \
+      --with-avahi=yes \
+      --with-ssl=openssl \
+      --with-metadata=no \
+      --with-soxr=no \
+      --with-airplay-2=yes \
+      --disable-alsamixer \
+      --disable-ffmpeg \
+      --disable-alsa-device-monitor \
+    )
+endef
+
+define Build/Compile
+	$(MAKE) -C $(PKG_BUILD_DIR) $(MAKE_FLAGS) \
+      CFLAGS="$(TARGET_CFLAGS) -Os -pipe -fomit-frame-pointer" \
+      LDFLAGS="$(TARGET_LDFLAGS) -Wl,--gc-sections"
+endef
+
+define Package/shairport-sync/install
+	$(INSTALL_DIR) $(1)/etc/init.d
+    $(INSTALL_DIR) $(1)/usr/bin
+    $(INSTALL_BIN) $(PKG_BUILD_DIR)/shairport-sync $(1)/usr/bin/shairport-sync
     $(INSTALL_BIN) ./files/shairport-sync.init $(1)/etc/init.d/shairport-sync
     $(INSTALL_DIR) $(1)/etc/config
-    $(INSTALL_CONF) ./files/etc/config/shairport-sync $(1)/etc/config/shairport-sync
+    $(INSTALL_DATA) ./files/config.sample $(1)/etc/config/shairport-sync
 endef
 
-$(eval $(call BuildPackage,shairport-sync-airplay2))
+$(eval $(call BuildPackage,shairport-sync))

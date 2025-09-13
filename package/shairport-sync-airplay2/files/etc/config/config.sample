@@ -1,0 +1,7 @@
+general = {
+  name = "OpenWrt-AirPlay";
+  output_backend = "ao";
+  playback_mode = "stereo";
+  enable_airplay_2 = "yes";
+  volume_control = "yes";
+};
