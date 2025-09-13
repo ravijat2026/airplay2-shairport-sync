@@ -1,0 +1,40 @@
+name: Build Shairport-Sync AirPlay2
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential git wget unzip libncurses5-dev libssl-dev gettext xsltproc
+
+    - name: Download OpenWrt SDK
+      run: |
+        wget https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt76x8/openwrt-sdk-23.05.5-ramips-mt76x8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+        tar -xvf openwrt-sdk-*.tar.xz
+        mv openwrt-sdk-* sdk
+
+    - name: Copy package
+      run: |
+        mkdir -p sdk/package/sound/shairport-sync-airplay2
+        cp -r package/shairport-sync-airplay2/* sdk/package/sound/shairport-sync-airplay2/
+
+    - name: Build package
+      run: |
+        cd sdk
+        make defconfig
+        make package/shairport-sync-airplay2/compile V=s
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ipk-files
+        path: sdk/bin/packages/*/sound/*.ipk

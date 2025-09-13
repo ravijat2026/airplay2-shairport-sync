@@ -1,0 +1,6 @@
+config shairport-sync 'general'
+        option name 'OpenWrt-AirPlay2'
+        option output_backend 'alsa'
+        option volume_control 'yes'
+        option playback_controls 'yes'
+        option multiroom 'yes'
